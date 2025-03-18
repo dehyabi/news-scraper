@@ -76,7 +76,7 @@ def create_table():
 # Insert article into database
 def insert_article(title, url):
     try:
-        logging.info(f"Connecting to the database to insert the article: {title}")
+        logging.info(f"Attempting to insert article: Title={title}, URL={url}")
         conn = psycopg2.connect(
             dbname=database_name,
             user=database_user,
@@ -118,11 +118,11 @@ def search():
 
     logging.info("Running the scraper...")
     result = smart_scraper_graph.run()
-    logging.info(f"Scraper result: {result}")  # Log the scraper result
+    logging.info(f"Raw scraper result: {result}")  # Log the raw scraper result
 
     # Check if result contains items
-    if 'items' in result:
-        for item in result['items']:
+    if 'content' in result:  # Fix: Use 'content' instead of 'items'
+        for item in result['content']:
             title = item.get('title')
             url = item.get('url')
             if title and url:
