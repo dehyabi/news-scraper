@@ -3,7 +3,14 @@ import psycopg2
 import logging
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
-from scrapegraphai.graphs import SmartScraperGraph
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service as ChromeService
+from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.chrome.options import Options
+import threading
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -31,14 +38,6 @@ database_port = os.getenv("DATABASE_PORT")
 if not all([database_name, database_user, database_password, database_host, database_port]):
     logging.error("One or more database connection environment variables are not set.")
     exit(1)
-
-# ScrapeGraphAI configuration
-graph_config = {
-    "llm": {
-        "api_key": openai_key,
-        "model": "openai/gpt-4",  # Ensure this model is available in your OpenAI subscription
-    },
-}
 
 # Function to create the 'articles' table if it doesn't exist
 def create_table():
@@ -98,6 +97,54 @@ def insert_article(title, url):
             conn.close()
             logging.info("Database connection closed.")
 
+def run_scraping(search_url):
+    # Set up headless mode
+    options = Options()
+    options.headless = True  # Run in headless mode
+
+    # Initialize the WebDriver with options
+    driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()), options=options)
+
+    # Navigate to the search URL
+    driver.get(search_url)
+
+    # Wait for the elements to load
+    WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, 'figcaption > p > a')))
+
+    # Extract article titles and URLs
+    articles = []
+    links = driver.find_elements(By.CSS_SELECTOR, 'figcaption > p > a')
+    for link in links:
+        title = link.text
+        url = link.get_attribute('href')
+        articles.append({'title': title, 'url': url})
+
+    # Close the WebDriver
+    driver.quit()
+
+    # Prepare the result
+    result = {'content': articles}
+    logging.info(f"Raw scraper result: {result}")  # Log the raw scraper result
+
+    # Check if result contains items
+    if 'content' in result:  
+        if isinstance(result['content'], list):
+            for item in result['content']:
+                if isinstance(item, dict):
+                    title = item.get('title')
+                    url = item.get('url')
+                    if title and url:
+                        insert_article(title, url)
+                    else:
+                        logging.warning("Missing title or URL in item: %s", item)
+                else:
+                    logging.warning("Expected a dictionary but got a string: %s", item)
+        else:
+            logging.error("Expected a list but got: %s", result['content'])
+            return jsonify({'error': 'Unexpected data structure received.'}), 400
+    else:
+        logging.info("No items found in the result.")
+
 @app.route('/search', methods=['POST'])
 def search():
     data = request.get_json()
@@ -108,32 +155,13 @@ def search():
     search_query = data['query']
     logging.info(f"Received search query: {search_query}")
     
-    search_url = f"https://www.detik.com/search/searchall?query={search_query}&siteid=2&source_kanal=true"
+    search_url = f"https://www.tempo.co/search?q={search_query}"
 
-    smart_scraper_graph = SmartScraperGraph(
-        prompt="Extract all article titles and their corresponding URLs from the search results page.",
-        source=search_url,
-        config=graph_config
-    )
+    # Run the scraping in a separate thread
+    threading.Thread(target=run_scraping, args=(search_url,)).start()
 
-    logging.info("Running the scraper...")
-    result = smart_scraper_graph.run()
-    logging.info(f"Raw scraper result: {result}")  # Log the raw scraper result
-
-    # Check if result contains items
-    if 'content' in result:  # Fix: Use 'content' instead of 'items'
-        for item in result['content']:
-            title = item.get('title')
-            url = item.get('url')
-            if title and url:
-                insert_article(title, url)
-            else:
-                logging.warning("Missing title or URL in item: %s", item)
-    else:
-        logging.info("No items found in the result.")
-
-    # Return the result as a JSON response
-    return jsonify(result)
+    # Return a success response
+    return jsonify({"message": "Scraping started successfully!"})
 
 # Test route to verify database insertion
 @app.route('/test-insert', methods=['POST'])
