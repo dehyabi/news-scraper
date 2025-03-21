@@ -109,11 +109,11 @@ def run_scraping(search_url):
     driver.get(search_url)
 
     # Wait for the elements to load
-    WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, 'figcaption > p > a')))
+    WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, '.gs-title > a')))
 
     # Extract article titles and URLs
     articles = []
-    links = driver.find_elements(By.CSS_SELECTOR, 'figcaption > p > a')
+    links = driver.find_elements(By.CSS_SELECTOR, '.gs-title > a')
     for link in links:
         title = link.text
         url = link.get_attribute('href')
@@ -155,7 +155,7 @@ def search():
     search_query = data['query']
     logging.info(f"Received search query: {search_query}")
     
-    search_url = f"https://www.tempo.co/search?q={search_query}"
+    search_url = f"https://search.kompas.com/search/?q={search_query}"
 
     # Run the scraping in a separate thread
     threading.Thread(target=run_scraping, args=(search_url,)).start()
