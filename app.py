@@ -116,7 +116,7 @@ class WebDriver:
 
 web_driver = WebDriver()
 
-@app.route('/search', methods=['POST'])
+@app.route('/scrape', methods=['POST'])
 def search():
     data = request.get_json()
     if not data or 'query' not in data:
