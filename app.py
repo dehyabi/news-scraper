@@ -8,24 +8,24 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 
-# Configure logging
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
-
 # Load environment variables
 load_dotenv()
+
+# Configure logging
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Initialize Flask app
 app = Flask(__name__)
 
 # Retrieve database connection details from environment variables
-database_name = os.getenv("DATABASE_NAME")
-database_user = os.getenv("DATABASE_USER")
-database_password = os.getenv("DATABASE_PASSWORD")
-database_host = os.getenv("DATABASE_HOST")
-database_port = os.getenv("DATABASE_PORT")
+DATABASE_NAME = os.getenv("DATABASE_NAME")
+DATABASE_USER = os.getenv("DATABASE_USER")
+DATABASE_PASSWORD = os.getenv("DATABASE_PASSWORD")
+DATABASE_HOST = os.getenv("DATABASE_HOST")
+DATABASE_PORT = os.getenv("DATABASE_PORT")
 
 # Check if all database connection details are set
-if not all([database_name, database_user, database_password, database_host, database_port]):
+if not all([DATABASE_NAME, DATABASE_USER, DATABASE_PASSWORD, DATABASE_HOST, DATABASE_PORT]):
     logging.error("One or more database connection environment variables are not set.")
     exit(1)
 
@@ -34,11 +34,11 @@ def create_table():
     try:
         logging.info("Connecting to the database to create the 'articles' table...")
         conn = psycopg2.connect(
-            dbname=database_name,
-            user=database_user,
-            password=database_password,
-            host=database_host,
-            port=database_port
+            dbname=DATABASE_NAME,
+            user=DATABASE_USER,
+            password=DATABASE_PASSWORD,
+            host=DATABASE_HOST,
+            port=DATABASE_PORT
         )
         cursor = conn.cursor()
 
@@ -125,11 +125,11 @@ def search():
     try:
         logging.info("Connecting to the database to insert article...")
         conn = psycopg2.connect(
-            dbname=database_name,
-            user=database_user,
-            password=database_password,
-            host=database_host,
-            port=database_port
+            dbname=DATABASE_NAME,
+            user=DATABASE_USER,
+            password=DATABASE_PASSWORD,
+            host=DATABASE_HOST,
+            port=DATABASE_PORT
         )
         cursor = conn.cursor()
 

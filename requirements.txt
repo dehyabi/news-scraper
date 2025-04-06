@@ -3,4 +3,4 @@ psycopg2
 python-dotenv
 selenium
 webdriver-manager
-redis
+gunicorn==20.1.0
