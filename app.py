@@ -160,7 +160,7 @@ def search():
             logging.info("Database connection closed.")
 
     # Return a success response
-    return jsonify({"message": "Scraping started successfully!"})
+    return jsonify({"message": "Articles scraped successfully!"})
 
 @app.route('/articles', methods=['GET'])
 def get_articles():
