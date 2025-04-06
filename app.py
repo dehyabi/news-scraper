@@ -68,17 +68,19 @@ def create_table():
 
 def insert_articles(cursor, title, url, description=None, candidate_id=None, candidate_name=None, scraped_at=None):
     try:
-        # Ensure the timestamp is formatted correctly when captured
         if scraped_at is None:
             scraped_at = datetime.now().strftime('%Y-%m-%d %H:%M')
-        
+
         cursor.execute('''
             INSERT INTO articles (title, url, description, candidate_id, candidate_name, scraped_at)
             VALUES (%s, %s, %s, %s, %s, %s)
+            ON CONFLICT (url) DO NOTHING
         ''', (title, url, description, candidate_id, candidate_name, scraped_at))
-        logging.info("Article inserted successfully.")
+
+        logging.info(f"Article inserted: {title}")
     except Exception as e:
         logging.error(f"Error inserting article: {e}")
+
 
 class WebDriver:
     def __init__(self):
@@ -86,28 +88,42 @@ class WebDriver:
 
     def run_scraping(self, cursor, search_url, payload):
         options = webdriver.ChromeOptions()
-        options.add_argument('--headless')  # Run in headless mode (no GUI)
+        options.add_argument('--headless')
         driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
-        
+
         try:
             driver.get(search_url)
-            # Extract title from the specified selector
-            title_element = driver.find_element(By.CSS_SELECTOR, '.gs-title > a')
-            title = title_element.text.strip() if title_element else None
+            article_elements = driver.find_elements(By.CSS_SELECTOR, '.gsc-expansionArea .gsc-webResult.gsc-result')[:3]
 
-            # Extract URL from the specified selector
-            url_element = driver.find_element(By.CSS_SELECTOR, '.gs-title > a')
-            url = url_element.get_attribute('href') if url_element else None
+            for article in article_elements:
+                try:
+                    title_element = article.find_element(By.CSS_SELECTOR, '.gs-title')
+                    url = article.find_element(By.CSS_SELECTOR, '.gsc-thumbnail-left a').get_attribute('href')
+                    title = title_element.text.strip()
 
-            # Extract description from the specified selector
-            description_element = driver.find_element(By.CSS_SELECTOR, '.gs-bidi-start-align.gs-snippet')
-            description = description_element.text.strip() if description_element else None
+                    description_element = article.find_element(By.CSS_SELECTOR, '.gs-snippet')
+                    description = description_element.text.strip() if description_element else None
 
-            logging.info(f"Extracted title: {title}")
-            logging.info(f"Extracted URL: {url}")
-            logging.info(f"Extracted description: {description}")
+                    logging.info(f"Extracted title: {title}")
+                    logging.info(f"Extracted URL: {url}")
+                    logging.info(f"Extracted description: {description}")
+
+                    if title and url:
+                        insert_articles(
+                            cursor,
+                            title,
+                            url,
+                            description,
+                            payload['candidate_id'],
+                            payload['candidate_name']
+                        )
+                except Exception as inner_e:
+                    logging.warning(f"Failed to extract one article: {inner_e}")
+        except Exception as e:
+            logging.error(f"Scraping error: {e}")
         finally:
-            driver.quit()  # Ensure the WebDriver is closed
+            driver.quit()
+
 
         # Insert scraped data into the database
         if title or url or description:
