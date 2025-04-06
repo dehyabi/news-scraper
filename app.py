@@ -7,6 +7,7 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
+from datetime import datetime
 
 # Load environment variables
 load_dotenv()
@@ -50,7 +51,8 @@ def create_table():
                 url TEXT NOT NULL UNIQUE,
                 description TEXT,
                 candidate_id INTEGER,
-                candidate_name TEXT
+                candidate_name TEXT,
+                scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
         conn.commit()
@@ -64,12 +66,16 @@ def create_table():
             conn.close()
             logging.info("Database connection closed.")
 
-def insert_articles(cursor, title, url, description=None, candidate_id=None, candidate_name=None):
+def insert_articles(cursor, title, url, description=None, candidate_id=None, candidate_name=None, scraped_at=None):
     try:
+        # Ensure the timestamp is formatted correctly when captured
+        if scraped_at is None:
+            scraped_at = datetime.now().strftime('%Y-%m-%d %H:%M')
+        
         cursor.execute('''
-            INSERT INTO articles (title, url, description, candidate_id, candidate_name)
-            VALUES (%s, %s, %s, %s, %s)
-        ''', (title, url, description, candidate_id, candidate_name))
+            INSERT INTO articles (title, url, description, candidate_id, candidate_name, scraped_at)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        ''', (title, url, description, candidate_id, candidate_name, scraped_at))
         logging.info("Article inserted successfully.")
     except Exception as e:
         logging.error(f"Error inserting article: {e}")
