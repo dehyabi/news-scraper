@@ -94,7 +94,7 @@ class WebDriver:
             url = url_element.get_attribute('href') if url_element else None
 
             # Extract description from the specified selector
-            description_element = driver.find_element(By.CSS_SELECTOR, '.gs-title > a')
+            description_element = driver.find_element(By.CSS_SELECTOR, '.gs-bidi-start-align.gs-snippet')
             description = description_element.text.strip() if description_element else None
 
             logging.info(f"Extracted title: {title}")
