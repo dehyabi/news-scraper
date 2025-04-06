@@ -76,6 +76,24 @@ gunicorn -w 4 -b 0.0.0.0:5000 app:app
 
 You may need to modify the `app.py` file to set the appropriate search URL and payload for scraping.
 
+## Access Token
+
+To access the endpoints, you need to include an access token in the request headers.
+
+### For GET requests:
+
+```bash
+curl -X GET -H "Authorization: Bearer <your_access_token>" "http://localhost:5000/articles?candidate_id=1"
+```
+
+### For POST requests:
+
+```bash
+curl -X POST -H "Authorization: Bearer <your_access_token>" -H "Content-Type: application/json" -d '{"query": "prabowo", "candidate_id": 1}' http://localhost:5000/scrape
+```
+
+Replace `<your_access_token>` with your actual access token and adjust the URL to match your API endpoint.
+
 ## Logging
 
 The application logs extracted data and any errors encountered during the scraping process.

@@ -11,6 +11,7 @@ from datetime import datetime
 
 # Load environment variables
 load_dotenv()
+ACCESS_TOKEN_KEY = os.getenv('ACCESS_TOKEN_KEY')
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -131,6 +132,16 @@ class WebDriver:
         logging.info("Scraped data inserted into the database.")
 
 web_driver = WebDriver()
+
+# Add access token validation to the routes
+@app.before_request
+def require_token():
+    token = request.headers.get('Authorization')
+    if not token or not token.startswith('Bearer '):
+        return jsonify({'message': 'Access token is missing or invalid.'}), 401
+    # Validate the token
+    if token.split(" ")[1] != ACCESS_TOKEN_KEY:
+        return jsonify({'message': 'Access token is invalid.'}), 403
 
 @app.route('/scrape', methods=['POST'])
 def search():
