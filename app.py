@@ -162,4 +162,52 @@ def search():
     # Return a success response
     return jsonify({"message": "Scraping started successfully!"})
 
+@app.route('/articles', methods=['GET'])
+def get_articles():
+    candidate_id = request.args.get('candidate_id')
+    
+    if not candidate_id:
+        return jsonify({"error": "candidate_id is required"}), 400
+    
+    try:
+        conn = psycopg2.connect(
+            dbname=DATABASE_NAME,
+            user=DATABASE_USER,
+            password=DATABASE_PASSWORD,
+            host=DATABASE_HOST,
+            port=DATABASE_PORT
+        )
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT * FROM articles WHERE candidate_id = %s
+        ''', (candidate_id,))
+        
+        articles = cursor.fetchall()
+        
+        # Format the articles for JSON response
+        articles_list = []
+        for article in articles:
+            articles_list.append({
+                "id": article[0],
+                "title": article[1],
+                "url": article[2],
+                "description": article[3],
+                "candidate_id": article[4],
+                "candidate_name": article[5],
+                "scraped_at": article[6].strftime('%Y-%m-%d %H:%M') if article[6] else None
+            })
+        
+        return jsonify(articles_list), 200
+    
+    except Exception as e:
+        logging.error(f"Error fetching articles: {e}")
+        return jsonify({"error": "An error occurred while fetching articles"}), 500
+    
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if 'conn' in locals():
+            conn.close()
+
 create_table()
