@@ -1,6 +1,7 @@
 import os
 import psycopg2
 import logging
+import tempfile
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 from selenium import webdriver
@@ -19,22 +20,22 @@ logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %
 # Initialize Flask app
 app = Flask(__name__)
 
-# Retrieve database connection details from environment variables
+# Retrieve DB credentials from env
 DATABASE_NAME = os.getenv("DATABASE_NAME")
 DATABASE_USER = os.getenv("DATABASE_USER")
 DATABASE_PASSWORD = os.getenv("DATABASE_PASSWORD")
 DATABASE_HOST = os.getenv("DATABASE_HOST")
 DATABASE_PORT = os.getenv("DATABASE_PORT")
 
-# Check if all database connection details are set
+# Ensure DB credentials exist
 if not all([DATABASE_NAME, DATABASE_USER, DATABASE_PASSWORD, DATABASE_HOST, DATABASE_PORT]):
-    logging.error("One or more database connection environment variables are not set.")
+    logging.error("Missing database environment variables.")
     exit(1)
 
-# Function to create the 'articles' table if it doesn't exist
+# Create articles table if not exists
 def create_table():
     try:
-        logging.info("Connecting to the database to create the 'articles' table...")
+        logging.info("Connecting to DB to create table...")
         conn = psycopg2.connect(
             dbname=DATABASE_NAME,
             user=DATABASE_USER,
@@ -44,10 +45,21 @@ def create_table():
         )
         cursor = conn.cursor()
 
-        # SQL query to create the 'articles' table
-        cursor.execute('''
+        # Buat sequence jika belum ada
+        cursor.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (SELECT 1 FROM pg_class WHERE relname = 'articles_id_seq') THEN
+                    CREATE SEQUENCE articles_id_seq;
+                END IF;
+            END
+            $$;
+        """)
+
+        # Buat table
+        cursor.execute("""
             CREATE TABLE IF NOT EXISTS articles (
-                id SERIAL PRIMARY KEY,
+                id INTEGER PRIMARY KEY DEFAULT nextval('articles_id_seq'),
                 title TEXT NOT NULL,
                 url TEXT NOT NULL UNIQUE,
                 description TEXT,
@@ -55,33 +67,27 @@ def create_table():
                 candidate_name TEXT,
                 scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
-        ''')
+        """)
         conn.commit()
-        logging.info("'articles' table created successfully.")
+        logging.info("Table 'articles' created or already exists.")
     except Exception as e:
         logging.error(f"Error creating table: {e}")
     finally:
-        if 'cursor' in locals():
-            cursor.close()
-        if 'conn' in locals():
-            conn.close()
-            logging.info("Database connection closed.")
+        if 'cursor' in locals(): cursor.close()
+        if 'conn' in locals(): conn.close()
 
 def insert_articles(cursor, title, url, description=None, candidate_id=None, candidate_name=None, scraped_at=None):
     try:
         if scraped_at is None:
             scraped_at = datetime.now().strftime('%Y-%m-%d %H:%M')
-
         cursor.execute('''
             INSERT INTO articles (title, url, description, candidate_id, candidate_name, scraped_at)
             VALUES (%s, %s, %s, %s, %s, %s)
             ON CONFLICT (url) DO NOTHING
         ''', (title, url, description, candidate_id, candidate_name, scraped_at))
-
-        logging.info(f"Article inserted: {title}")
+        logging.info(f"Inserted article: {title}")
     except Exception as e:
-        logging.error(f"Error inserting article: {e}")
-
+        logging.error(f"Insert error: {e}")
 
 class WebDriver:
     def __init__(self):
@@ -90,10 +96,19 @@ class WebDriver:
     def run_scraping(self, cursor, search_url, payload):
         options = webdriver.ChromeOptions()
         options.add_argument('--headless')
+        options.add_argument('--no-sandbox')
+        options.add_argument('--disable-dev-shm-usage')
+
+        # ✅ Use unique user data dir per session
+        temp_dir = tempfile.mkdtemp()
+        options.add_argument(f'--user-data-dir={temp_dir}')
+
         driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
 
         try:
+            logging.debug(f"Visiting: {search_url}")
             driver.get(search_url)
+
             article_elements = driver.find_elements(By.CSS_SELECTOR, '.gsc-expansionArea .gsc-webResult.gsc-result')[:3]
 
             for article in article_elements:
@@ -102,61 +117,48 @@ class WebDriver:
                     url = article.find_element(By.CSS_SELECTOR, '.gsc-thumbnail-left a').get_attribute('href')
                     title = title_element.text.strip()
 
-                    description_element = article.find_element(By.CSS_SELECTOR, '.gs-snippet')
-                    description = description_element.text.strip() if description_element else None
+                    desc_elem = article.find_element(By.CSS_SELECTOR, '.gs-snippet')
+                    description = desc_elem.text.strip() if desc_elem else None
 
-                    logging.info(f"Extracted title: {title}")
-                    logging.info(f"Extracted URL: {url}")
-                    logging.info(f"Extracted description: {description}")
-
-                    if title and url:
-                        insert_articles(
-                            cursor,
-                            title,
-                            url,
-                            description,
-                            payload['candidate_id'],
-                            payload['candidate_name']
-                        )
+                    logging.info(f"Scraped: {title}, {url}")
+                    insert_articles(
+                        cursor, title, url, description,
+                        payload['candidate_id'], payload['candidate_name']
+                    )
                 except Exception as inner_e:
-                    logging.warning(f"Failed to extract one article: {inner_e}")
+                    logging.warning(f"Failed scraping one article: {inner_e}")
         except Exception as e:
             logging.error(f"Scraping error: {e}")
         finally:
             driver.quit()
 
-
-        # Insert scraped data into the database
-        if title or url or description:
-            insert_articles(cursor, title, url, description, payload['candidate_id'], payload['candidate_name'])
-        logging.info("Scraped data inserted into the database.")
-
 web_driver = WebDriver()
 
-# Add access token validation to the routes
 @app.before_request
 def require_token():
     token = request.headers.get('Authorization')
     if not token or not token.startswith('Bearer '):
-        return jsonify({'message': 'Access token is missing or invalid.'}), 401
-    # Validate the token
+        return jsonify({'message': 'Access token missing or invalid.'}), 401
     if token.split(" ")[1] != ACCESS_TOKEN_KEY:
         return jsonify({'message': 'Access token is invalid.'}), 403
 
 @app.route('/scrape', methods=['POST'])
-def search():
+def scrape():
     data = request.get_json()
     if not data or 'query' not in data:
-        logging.warning("Invalid input. 'query' is required.")
-        return jsonify({"error": "Invalid input. 'query' is required."}), 400
+        return jsonify({"error": "'query' is required."}), 400
 
-    search_query = data['query']
-    logging.info(f"Received search query: {search_query}")
-    
-    search_url = f'https://search.kompas.com/search/?q={search_query}'
+    query = data['query']
+    candidate_id = data.get('candidate_id')
+    search_url = f'https://search.kompas.com/search/?q={query}'
+
+    payload = {
+        'search_query': query,
+        'candidate_id': candidate_id,
+        'candidate_name': query
+    }
 
     try:
-        logging.info("Connecting to the database to insert article...")
         conn = psycopg2.connect(
             dbname=DATABASE_NAME,
             user=DATABASE_USER,
@@ -165,37 +167,22 @@ def search():
             port=DATABASE_PORT
         )
         cursor = conn.cursor()
-
-        candidate_id = request.json.get('candidate_id')
-
-        payload = {
-            'search_query': search_query,
-            'candidate_id': candidate_id,
-            'candidate_name': search_query  # Set candidate_name to be the same as search_query
-        }
-
-        # Run the scraping
         web_driver.run_scraping(cursor, search_url, payload)
         conn.commit()
     except Exception as e:
-        logging.error(f"Error inserting article: {e}")
+        logging.error(f"DB Insert error: {e}")
     finally:
-        if 'cursor' in locals():
-            cursor.close()
-        if 'conn' in locals():
-            conn.close()
-            logging.info("Database connection closed.")
+        if 'cursor' in locals(): cursor.close()
+        if 'conn' in locals(): conn.close()
 
-    # Return a success response
-    return jsonify({"message": "Articles scraped successfully!"})
+    return jsonify({"message": "Scraping complete."})
 
 @app.route('/articles', methods=['GET'])
 def get_articles():
     candidate_id = request.args.get('candidate_id')
-    
     if not candidate_id:
         return jsonify({"error": "candidate_id is required"}), 400
-    
+
     try:
         conn = psycopg2.connect(
             dbname=DATABASE_NAME,
@@ -205,36 +192,26 @@ def get_articles():
             port=DATABASE_PORT
         )
         cursor = conn.cursor()
-        
-        cursor.execute('''
-            SELECT * FROM articles WHERE candidate_id = %s
-        ''', (candidate_id,))
-        
-        articles = cursor.fetchall()
-        
-        # Format the articles for JSON response
-        articles_list = []
-        for article in articles:
-            articles_list.append({
-                "id": article[0],
-                "title": article[1],
-                "url": article[2],
-                "description": article[3],
-                "candidate_id": article[4],
-                "candidate_name": article[5],
-                "scraped_at": article[6].strftime('%Y-%m-%d %H:%M') if article[6] else None
-            })
-        
-        return jsonify(articles_list), 200
-    
-    except Exception as e:
-        logging.error(f"Error fetching articles: {e}")
-        return jsonify({"error": "An error occurred while fetching articles"}), 500
-    
-    finally:
-        if 'cursor' in locals():
-            cursor.close()
-        if 'conn' in locals():
-            conn.close()
+        cursor.execute("SELECT * FROM articles WHERE candidate_id = %s", (candidate_id,))
+        rows = cursor.fetchall()
 
+        result = [{
+            "id": row[0],
+            "title": row[1],
+            "url": row[2],
+            "description": row[3],
+            "candidate_id": row[4],
+            "candidate_name": row[5],
+            "scraped_at": row[6].strftime('%Y-%m-%d %H:%M') if row[6] else None
+        } for row in rows]
+
+        return jsonify(result), 200
+    except Exception as e:
+        logging.error(f"Fetch error: {e}")
+        return jsonify({"error": "Internal error."}), 500
+    finally:
+        if 'cursor' in locals(): cursor.close()
+        if 'conn' in locals(): conn.close()
+
+# Create table on start
 create_table()
